@@ -87,7 +87,7 @@ INT32 main(INT32 argc, CHAR *argv[])
                                                                     pSampleConfiguration->pCaCertPath,
                                                                     NULL,
                                                                     NULL,
-                                                                    FALSE,
+         //                                                           FALSE,
                                                                     &pClientCallbacks));
 
         CHK_STATUS(createKinesisVideoClient(pDeviceInfo, pClientCallbacks, &clientHandle));

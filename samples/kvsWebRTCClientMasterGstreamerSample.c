@@ -2,6 +2,40 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
 
+const char KVS_PERSISTENCE_CB_REV[] = "004";
+/*********************************************************************************************
+Revision History:
+Rev.      By   Date      Change Description
+--------  ---  --------  ---------------------------------------------------------------------
+ 004  DM   04/15/2020
+ Action:
+ a. Remove compiler warning in:
+    /samples/kvsWebRTCClientMasterGstreamerSample.c
+	/open-source/amazon-kinesis-video-streams-pic/src/common/include/com/amazonaws/kinesis/video/common/CommonDefs.h(1070)
+	was: #define INVALID_PIC_HANDLE_VALUE ((UINT64) NULL)
+	is:  #define INVALID_PIC_HANDLE_VALUE ((UINT32) NULL)
+ 
+ 003  DM   04/14/2020
+ Action:
+ a. Rename KVS_PERSISTENCE_CB to KVS_PERSISTENCE_CB_REV
+
+ 002  DM   04/14/2020
+ Action:
+ a. Rename CB_STREAMER_REV to KVS_PERSISTENCE_CB
+ b. Save project in kvs_persistence_cb
+ 
+ 001  DM   04/08/2020
+ Action:
+ a. Replace pipeline in SAMPLE_STREAMING_VIDEO_ONLY state
+    To enable saving stream to MkV file and add audio to the MKV file
+ Problem:
+ b. Fail to call freeSignalingClient() on app termination (^c)
+ Observation:
+ b. THREAD_JOIN(pSampleConfiguration->videoSenderTid, NULL) is blocking if audio added to the MKV file 
+ Action:
+ b. comment out THREAD_JOIN(pSampleConfiguration->videoSenderTid, NULL)
+
+*********************************************************************************************/
 extern PSampleConfiguration gSampleConfiguration;
 static BOOL gStreamingStarted = FALSE;
 
@@ -146,10 +180,10 @@ PVOID sendGstreamerAudioVideo(PVOID args)
 
     switch (pSampleConfiguration->mediaType) {
         case SAMPLE_STREAMING_VIDEO_ONLY:
-            pipeline = gst_parse_launch(
-                    "autovideosrc ! queue ! videoconvert ! video/x-raw,width=1280,height=720,framerate=30/1 ! x264enc bframes=0 speed-preset=veryfast key-int-max=30 bitrate=512 ! "
-                    "video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline ! appsink sync=TRUE emit-signals=TRUE name=appsink-video",
-                    &error);
+			pipeline = gst_parse_launch("rpicamsrc rotation=270 ! queue ! videoconvert ! video/x-raw,width=640,height=480,framerate=25/1 ! x264enc bframes=0 speed-preset=veryfast key-int-max=30 bitrate=512 ! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline ! tee name=t ! queue ! appsink sync=TRUE emit-signals=TRUE name=appsink-video "
+			 "t. ! queue ! h264parse ! mux. "
+			 "alsasrc device=hw:1,0 ! audio/x-raw,format=S16LE,rate=16000,channels=2 ! queue ! mux. "
+			 "matroskamux name=mux ! filesink location=test.mkv ", &error); 
             break;
 
         case SAMPLE_STREAMING_AUDIO_VIDEO:
@@ -197,14 +231,14 @@ CleanUp:
     }
 
     CHK_LOG_ERR_NV(retStatus);
-    return (PVOID) (ULONG_PTR) retStatus;
+    return (PVOID) (UINT_PTR) retStatus;
 }
 
 VOID onGstAudioFrameReady(UINT64 customData, PFrame pFrame)
 {
     GstFlowReturn ret;
     GstBuffer *buffer;
-    GstElement *appsrcAudio = (GstElement *) customData;
+    GstElement *appsrcAudio = (GstElement *)(UINT32)customData;
 
     /* Create a new empty buffer */
     buffer = gst_buffer_new_and_alloc(pFrame->size);
@@ -220,7 +254,7 @@ VOID onGstAudioFrameReady(UINT64 customData, PFrame pFrame)
 VOID onSampleStreamingSessionShutdown(UINT64 customData, PSampleStreamingSession pSampleStreamingSession)
 {
     UNUSED_PARAM(pSampleStreamingSession);
-    GstElement *appsrc = (GstElement *) customData;
+    GstElement *appsrc = (GstElement *)(UINT32)customData;
     GstFlowReturn ret;
 
     g_signal_emit_by_name (appsrc, "end-of-stream", &ret);
@@ -261,10 +295,10 @@ PVOID receiveGstreamerAudioVideo(PVOID args)
     CHK_ERR(appsrcAudio != NULL, STATUS_INTERNAL_ERROR, "cant find appsrc");
 
     transceiverOnFrame(pSampleStreamingSession->pAudioRtcRtpTransceiver,
-                       (UINT64) appsrcAudio,
+                       (UINT64)(UINT32)appsrcAudio,
                        onGstAudioFrameReady);
 
-    CHK_STATUS(streamingSessionOnShutdown(pSampleStreamingSession, (UINT64) appsrcAudio, onSampleStreamingSessionShutdown));
+    CHK_STATUS(streamingSessionOnShutdown(pSampleStreamingSession, (UINT64)(UINT32)appsrcAudio, onSampleStreamingSessionShutdown));
 
     g_free(audioVideoDescription);
 
@@ -291,7 +325,7 @@ CleanUp:
     }
 
     CHK_LOG_ERR_NV(retStatus);
-    return (PVOID) (ULONG_PTR) retStatus;
+    return (PVOID) (UINT_PTR) retStatus;
 }
 
 INT32 main(INT32 argc, CHAR *argv[])
@@ -324,7 +358,7 @@ INT32 main(INT32 argc, CHAR *argv[])
     pSampleConfiguration->mediaType = SAMPLE_STREAMING_VIDEO_ONLY;
     pSampleConfiguration->receiveAudioVideoSource = receiveGstreamerAudioVideo;
     pSampleConfiguration->onDataChannel = onDataChannel;
-    pSampleConfiguration->customData = (UINT64) pSampleConfiguration;
+    pSampleConfiguration->customData = (UINT64)(UINT32) pSampleConfiguration;
 
     /* Initialize GStreamer */
     gst_init(&argc, &argv);
@@ -363,7 +397,7 @@ INT32 main(INT32 argc, CHAR *argv[])
     signalingClientCallbacks.messageReceivedFn = masterMessageReceived;
     signalingClientCallbacks.errorReportFn = NULL;
     signalingClientCallbacks.stateChangeFn = signalingClientStateChanged;
-    signalingClientCallbacks.customData = (UINT64) pSampleConfiguration;
+    signalingClientCallbacks.customData = (UINT64)(UINT32)pSampleConfiguration;
 
     clientInfo.version = SIGNALING_CLIENT_INFO_CURRENT_VERSION;
     STRCPY(clientInfo.clientId, SAMPLE_MASTER_CLIENT_ID);
@@ -402,7 +436,7 @@ INT32 main(INT32 argc, CHAR *argv[])
                                                                     pSampleConfiguration->pCaCertPath,
                                                                     NULL,
                                                                     NULL,
-                                                                    FALSE,
+        //                                                            FALSE,
                                                                     &pClientCallbacks));
 
         CHK_STATUS(createKinesisVideoClient(pDeviceInfo, pClientCallbacks, &clientHandle));
@@ -442,10 +476,10 @@ CleanUp:
         // Kick of the termination sequence
         ATOMIC_STORE_BOOL(&pSampleConfiguration->appTerminateFlag, TRUE);
 
-        if (IS_VALID_TID_VALUE(pSampleConfiguration->videoSenderTid)) {
-            // Join the threads
-            THREAD_JOIN(pSampleConfiguration->videoSenderTid, NULL);
-        }
+//        if (IS_VALID_TID_VALUE(pSampleConfiguration->videoSenderTid)) {
+//            // Join the threads
+//            THREAD_JOIN(pSampleConfiguration->videoSenderTid, NULL);
+//        }
 
         CHK_LOG_ERR_NV(freeSignalingClient(&pSampleConfiguration->signalingClientHandle));
         CHK_LOG_ERR_NV(freeSampleConfiguration(&pSampleConfiguration));
@@ -458,5 +492,8 @@ CleanUp:
     CHK_LOG_ERR_NV(freeCallbacksProvider(&pClientCallbacks));
 
     printf("[KVS Gstreamer Master] Cleanup done\n");
+	char str_temp[32];
+	sprintf(str_temp, "*** KVS_PERSISTENCE_CB_REV = %s ***\n", KVS_PERSISTENCE_CB_REV);
+    printf(str_temp);
     return (INT32) retStatus;
 }
